@@ -1,4 +1,3 @@
-// ==================== LOAD ENVIRONMENT VARIABLES ====================
 require('dotenv').config();
 
 const express = require('express');
@@ -8,49 +7,29 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const { Sequelize, DataTypes } = require('sequelize');
 
-// ==================== CONFIG ====================
-const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+const PORT = process.env.PORT || 5000;
+const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
-const DATABASE_URL = process.env.DATABASE_URL;
-const PORT = process.env.PORT || 5000;
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 
-// ==================== VALIDATE ENV ====================
-if (!DATABASE_URL) {
-    console.error('❌ DATABASE_URL not defined. Set it in .env or Render environment variables.');
+if (!DATABASE_URL || !JWT_SECRET || !PAYSTACK_SECRET_KEY) {
+    console.error('❌ Please set DATABASE_URL, JWT_SECRET, and PAYSTACK_SECRET_KEY in .env or Render environment variables');
     process.exit(1);
 }
 
-if (!JWT_SECRET) {
-    console.error('❌ JWT_SECRET not defined. Set it in .env or Render environment variables.');
-    process.exit(1);
-}
-
-if (!PAYSTACK_SECRET_KEY) {
-    console.error('❌ PAYSTACK_SECRET_KEY not defined. Set it in .env or Render environment variables.');
-    process.exit(1);
-}
-
-// ==================== INIT EXPRESS ====================
 const app = express();
 app.use(cors({ origin: CLIENT_URL, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ==================== DATABASE ====================
-const sequelize = new Sequelize(DATABASE_URL, {
-    dialect: 'postgres',
-    logging: false
-});
-
+// -------------------- DATABASE --------------------
+const sequelize = new Sequelize(DATABASE_URL, { dialect: 'postgres', logging: false });
 sequelize.authenticate()
     .then(() => console.log('✅ PostgreSQL connected'))
-    .catch(err => {
-        console.error('❌ DB Connection Error:', err.message);
-        process.exit(1);
-    });
+    .catch(err => { console.error('❌ DB Connection Error:', err.message); process.exit(1); });
 
-// ==================== MODELS ====================
+// -------------------- MODELS --------------------
 const User = sequelize.define('User', {
     name: { type: DataTypes.STRING, allowNull: false },
     email: { type: DataTypes.STRING, allowNull: false, unique: true },
@@ -71,7 +50,7 @@ Transaction.belongsTo(User);
 
 sequelize.sync({ alter: true });
 
-// ==================== HELPERS ====================
+// -------------------- HELPERS --------------------
 const generateToken = (id) => jwt.sign({ id }, JWT_SECRET, { expiresIn: '7d' });
 
 const protect = async (req, res, next) => {
@@ -92,16 +71,9 @@ const protect = async (req, res, next) => {
     }
 };
 
-// ==================== ROUTES ====================
-
+// -------------------- ROUTES --------------------
 // Health check
-app.get('/', (req, res) => {
-    res.json({
-        success: true,
-        message: 'EbusPay API running',
-        paystack: 'Configured ✅'
-    });
-});
+app.get('/', (req, res) => res.json({ success: true, message: 'EbusPay API running', paystack: 'Configured ✅' }));
 
 // Signup
 app.post('/api/auth/signup', async (req, res) => {
@@ -109,15 +81,12 @@ app.post('/api/auth/signup', async (req, res) => {
         const { name, email, password } = req.body;
         if (!name || !email || !password) return res.status(400).json({ success: false, message: 'All fields required' });
 
-        if (await User.findOne({ where: { email } })) return res.status(400).json({ success: false, message: 'User already exists' });
+        if (await User.findOne({ where: { email } })) return res.status(400).json({ success: false, message: 'User exists' });
 
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await User.create({ name, email, password: hashedPassword });
-
         res.status(201).json({ success: true, user: { id: user.id, name: user.name, email: user.email, balance: user.balance } });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // Login
@@ -132,19 +101,7 @@ app.post('/api/auth/login', async (req, res) => {
 
         const token = generateToken(user.id);
         res.json({ success: true, token, user: { id: user.id, name: user.name, email: user.email, balance: user.balance } });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-
-// Logout
-app.post('/api/auth/logout', protect, (req, res) => {
-    res.json({ success: true, message: 'Logged out successfully' });
-});
-
-// Profile
-app.get('/api/user/profile', protect, async (req, res) => {
-    res.json({ success: true, user: req.user });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // Deposit transaction
@@ -154,22 +111,14 @@ app.post('/api/transactions/deposit', protect, async (req, res) => {
         if (!amount || amount < 100) return res.status(400).json({ success: false, message: 'Minimum deposit ₦100' });
         if (!reference) return res.status(400).json({ success: false, message: 'Reference required' });
 
-        if (await Transaction.findOne({ where: { reference } })) return res.status(400).json({ success: false, message: 'Transaction already processed' });
+        if (await Transaction.findOne({ where: { reference } })) return res.status(400).json({ success: false, message: 'Transaction exists' });
 
         const transaction = await Transaction.create({ type: 'deposit', amount, reference, status: 'completed', UserId: req.user.id });
         req.user.balance += amount;
         await req.user.save();
 
         res.json({ success: true, transaction, balance: req.user.balance });
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-
-// Get transactions
-app.get('/api/transactions', protect, async (req, res) => {
-    const userTx = await Transaction.findAll({ where: { UserId: req.user.id }, order: [['createdAt', 'DESC']] });
-    res.json({ success: true, transactions: userTx });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 // Initialize Paystack payment
@@ -187,9 +136,7 @@ app.post('/api/payments/initialize', protect, async (req, res) => {
         }, { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } });
 
         res.json({ success: true, data: response.data.data });
-    } catch (err) {
-        res.status(500).json({ success: false, message: 'Error initializing payment', error: err.response?.data || err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false, message: 'Error initializing payment', error: err.response?.data || err.message }); }
 });
 
 // Verify Paystack payment
@@ -204,15 +151,11 @@ app.post('/api/payments/verify', protect, async (req, res) => {
 
         const data = response.data.data;
         const paidAmount = data.amount / 100;
-
         if (Math.abs(paidAmount - amount) > 0.01) return res.status(400).json({ success: false, message: 'Amount mismatch', expected: amount, received: paidAmount });
 
         res.json({ success: true, verified: true, data: { amount: paidAmount, reference: data.reference, paidAt: data.paid_at } });
-    } catch (err) {
-        res.status(500).json({ success: false, verified: false, message: 'Error verifying payment', error: err.response?.data || err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false, verified: false, message: 'Error verifying payment', error: err.response?.data || err.message }); }
 });
 
-// ==================== START SERVER ====================
+// -------------------- START SERVER --------------------
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
