@@ -9,15 +9,14 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 // -------------------- SECRET KEYS --------------------
-// Hardcoded secret key (for testing only)
-const PAYSTACK_SECRET_KEY = 'sk_test_1ae7634d7d57171ef43b8ac0087dfa6c72c9633f';
+const PAYSTACK_SECRET_KEY = 'sk_test_1ae7634d7d57171ef43b8ac0087dfa6c72c9633f'; // Hardcoded for testing
 const JWT_SECRET = 'supersecretkey';
 
 // --- In-memory user storage ---
-let users = []; // {id, fullname, email, passwordHash, walletBalance}
+let users = [];
 
 // Middleware: JWT Auth
 const authenticate = (req, res, next) => {
@@ -102,5 +101,6 @@ app.get('/api/wallet', authenticate, (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
 
 
