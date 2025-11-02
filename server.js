@@ -20,7 +20,7 @@ if (!DATABASE_URL || !JWT_SECRET || !PAYSTACK_SECRET_KEY) {
 
 // Initialize Express
 const app = express();
-app.use(cors({ origin: CLIENT_URL, credentials: true }));
+app.use(cors({ origin: ['https://ebuspay.vercel.app', 'http://localhost:3000'], credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -161,4 +161,5 @@ app.post('/api/payments/verify', protect, async (req, res) => {
 
 // -------------------- START SERVER --------------------
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
 
