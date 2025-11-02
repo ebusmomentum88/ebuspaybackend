@@ -1,71 +1,93 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path'); // Node.js module for working with file paths
+// 1. Paystack Library Initialization
+const Paystack = require('paystack-node'); 
 
 const app = express();
-// Render automatically sets the PORT environment variable. We use 3000 for local development.
 const PORT = process.env.PORT || 3000; 
 
-// --- Mock Database (Placeholder for a real database) ---
-// In a real application, you would connect to PostgreSQL, MongoDB, etc.
+// --- Configuration ---
+// 🛑 IMPORTANT: Replace 'YOUR_PAYSTACK_SECRET_KEY' with your actual sk_test_... key 🛑
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || 'sk_test_1ae7634d7d57171ef43b8ac0087dfa6c72c9633f';
+const paystack = new Paystack(PAYSTACK_SECRET_KEY, process.env.NODE_ENV);
+
+
+// --- Mock Database (for simplicity, now it holds users and transactions) ---
 let users = [];
+let transactions = [];
 
 // --- Middleware Setup ---
-// 1. CORS: Allows your frontend (EbusBet-Prototype) to talk to this backend
-app.use(cors({
-    origin: '*', // For a live app, change '*' to your specific Vercel domain
-}));
-// 2. JSON Parser: Handles incoming JSON data from the forms
+app.use(cors({ origin: '*' })); // Allow all origins
 app.use(express.json());
 
-// --- ROUTES ---
-
-// 1. Sign Up/Registration Route
+// --- Authentication Routes (Same as before) ---
 app.post('/api/signup', (req, res) => {
+    // ... [EXISTING SIGNUP LOGIC HERE] ...
     const { email, password, fullname } = req.body;
-
     if (!email || !password || !fullname) {
         return res.status(400).json({ success: false, message: 'All fields are required.' });
     }
-
     if (users.find(user => user.email === email)) {
-        return res.status(409).json({ success: false, message: 'User already exists.' });
+        return res.status(409).json({ success: false, message: 'User already exists with this email.' });
     }
-
-    // Create a new user (NOTE: NEVER store plain passwords in production!)
-    const newUser = {
-        id: users.length + 1,
-        fullname,
-        email,
-        password 
-    };
-
+    const newUser = { id: users.length + 1, fullname, email, password };
     users.push(newUser);
-    console.log('New User Registered:', newUser.email);
-
-    res.status(201).json({ success: true, message: 'Registration successful! You can now log in.', user: {fullname, email} });
+    res.status(201).json({ success: true, message: 'Registration successful!', user: {fullname, email} });
 });
 
-// 2. Login Route
 app.post('/api/login', (req, res) => {
+    // ... [EXISTING LOGIN LOGIC HERE] ...
     const { email, password } = req.body;
-
     const user = users.find(u => u.email === email);
-
-    if (!user) {
-        return res.status(401).json({ success: false, message: 'Login failed: User not found.' });
+    if (!user || user.password !== password) {
+        return res.status(401).json({ success: false, message: 'Login failed: Incorrect credentials.' });
     }
-
-    if (user.password !== password) {
-        return res.status(401).json({ success: false, message: 'Login failed: Incorrect password.' });
-    }
-
-    // Success
     res.status(200).json({ success: true, message: 'Login successful!', user: {fullname: user.fullname, email: user.email} });
 });
 
-// --- Health Check Route (Important for Render) ---
-// This simple GET route tells Render the server is alive.
+
+// ------------------------------------------------------------------
+// 3. NEW PAYMENT ROUTE: Initialize Paystack Transaction
+// ------------------------------------------------------------------
+app.post('/api/pay', async (req, res) => {
+    const { amount, email, currency = 'NGN' } = req.body;
+
+    if (!amount || !email) {
+        return res.status(400).json({ success: false, message: 'Amount and email are required.' });
+    }
+
+    // Amount must be in kobo (or the lowest denomination of the currency)
+    const amountInKobo = amount * 100;
+
+    try {
+        const response = await paystack.transaction.initialize({
+            amount: amountInKobo,
+            email: email,
+            currency: currency,
+            // A callback URL is usually needed for webhooks, 
+            // but for simple inline, Paystack handles the popup.
+        });
+
+        if (response.status) {
+            // Respond with the authorization URL/data needed by the frontend 
+            // to open the Paystack popup.
+            res.status(200).json({
+                success: true,
+                message: 'Payment initialized.',
+                data: response.data // Contains authorization_url and access_code
+            });
+        } else {
+            console.error('Paystack initialization error:', response.message);
+            res.status(500).json({ success: false, message: 'Failed to initialize payment with Paystack.' });
+        }
+    } catch (error) {
+        console.error('Server error during payment initialization:', error);
+        res.status(500).json({ success: false, message: 'Internal server error while processing payment.' });
+    }
+});
+
+
+// --- Health Check Route ---
 app.get('/', (req, res) => {
     res.status(200).send('EbusBet Backend is running successfully!');
 });
@@ -74,5 +96,5 @@ app.get('/', (req, res) => {
 // --- Server Start ---
 app.listen(PORT, () => {
     console.log(`EbusBet Backend Server running on port ${PORT}`);
-    console.log(`Mock Users loaded: ${users.length}`);
+    // In a real app, you would connect to PostgreSQL/MongoDB here.
 });
