@@ -158,8 +158,41 @@ app.post('/api/payments/verify', protect, async (req, res) => {
         res.json({ success: true, verified: true, data: { amount: paidAmount, reference: data.reference, paidAt: data.paid_at } });
     } catch (err) { res.status(500).json({ success: false, verified: false, message: 'Error verifying payment', error: err.response?.data || err.message }); }
 });
+// -------------------- NEWS ROUTES --------------------
+const News = sequelize.define('News', {
+  title: { type: DataTypes.STRING, allowNull: false },
+  content: { type: DataTypes.TEXT, allowNull: false },
+  imageUrl: { type: DataTypes.STRING },
+  publishedAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
+});
+sequelize.sync({ alter: true });
+
+// Create news
+app.post('/api/news', async (req, res) => {
+  try {
+    const { title, content, imageUrl } = req.body;
+    if (!title || !content)
+      return res.status(400).json({ success: false, message: 'Title and content required' });
+
+    const news = await News.create({ title, content, imageUrl });
+    res.json({ success: true, news });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Get all news
+app.get('/api/news', async (req, res) => {
+  try {
+    const news = await News.findAll({ order: [['publishedAt', 'DESC']] });
+    res.json({ success: true, news });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // -------------------- START SERVER --------------------
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
 
 
