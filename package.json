@@ -1,7 +1,7 @@
 {
   "name": "ebuspay-backend",
   "version": "1.0.0",
-  "description": "EbusPay backend with authentication and Paystack integration",
+  "description": "EbusPay backend with PostgreSQL, JWT auth, and Paystack integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -25,6 +25,7 @@
     "nodemon": "^3.0.2"
   }
 }
+
 
 
 
