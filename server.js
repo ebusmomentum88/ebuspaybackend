@@ -55,8 +55,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Routes
-
 // Health check
 app.get("/", (req, res) => res.send("✅ EbusPay Backend is running..."));
 
@@ -121,36 +119,31 @@ app.post("/api/news", upload.single("image"), async (req, res) => {
   }
 });
 
-// ✅ Updated GET /api/news to return full URLs
 app.get("/api/news", async (req, res) => {
   try {
     const news = await News.findAll({ order: [["createdAt", "DESC"]] });
-    const fullNews = news.map(n => ({
-      id: n.id,
-      title: n.title,
-      content: n.content,
-      imageUrl: n.imageUrl ? `${req.protocol}://${req.get('host')}${n.imageUrl}` : null,
-      createdAt: n.createdAt
-    }));
-    res.json({ success: true, news: fullNews });
-  } catch (err) {
-    console.error(err);
+    res.json({ success: true, news });
+  } catch {
     res.status(500).json({ message: "Error fetching news" });
   }
 });
 
+// Updated Delete News route with body check
 app.delete("/api/news/:id", async (req, res) => {
   try {
-    const { adminPassword } = req.query;
+    const { adminPassword } = req.body; // <-- change from query to body
     if (adminPassword !== process.env.ADMIN_PASSWORD) return res.status(403).json({ message: "Unauthorized" });
+
     const news = await News.findByPk(req.params.id);
-    if (!news) return res.status(404).json({ message: "Not found" });
+    if (!news) return res.status(404).json({ message: "News not found" });
+
     if (news.imageUrl) {
       const filePath = path.join(process.cwd(), news.imageUrl);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
+
     await news.destroy();
-    res.json({ success: true, message: "News deleted" });
+    res.json({ success: true, message: "News deleted successfully" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Error deleting news" });
