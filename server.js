@@ -1,158 +1,157 @@
-// server.js
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import multer from "multer";
-import path from "path";
-import fs from "fs";
-import { Sequelize, DataTypes } from "sequelize";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+// ==========================
+// server.js - Full Backend
+// ==========================
 
-dotenv.config();
+const express = require("express");
+const cors = require("cors");
+const multer = require("multer");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const fs = require("fs");
+const path = require("path");
+const fetch = require("node-fetch"); // For Paystack verification
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-
-// CORS
-app.use(cors({
-  origin: ["https://ebuspay.vercel.app", "http://localhost:3000"],
-  credentials: true
-}));
-
+app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static(path.join(__dirname, "uploads"))); // Serve uploaded images
 
-// Serve uploads
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-app.use("/uploads", express.static(uploadDir));
+// ==========================
+// Config & Storage
+// ==========================
+const PORT = process.env.PORT || 5000;
+const JWT_SECRET = "supersecretkey"; // Use env variable in production
+const PAYSTACK_SECRET = "sk_test_XXXXXXXXXXXXXXXX"; // replace with your Paystack secret
 
-// Database
-const sequelize = new Sequelize(process.env.DATABASE_URL, {
-  dialect: "postgres",
-  dialectOptions: { ssl: { require: true, rejectUnauthorized: false } },
-});
-
-// Models
-const User = sequelize.define("User", {
-  name: { type: DataTypes.STRING, allowNull: false },
-  email: { type: DataTypes.STRING, allowNull: false, unique: true },
-  password: { type: DataTypes.STRING, allowNull: false },
-  balance: { type: DataTypes.FLOAT, defaultValue: 0 }
-});
-
-const News = sequelize.define("News", {
-  title: { type: DataTypes.STRING, allowNull: false },
-  content: { type: DataTypes.TEXT, allowNull: false },
-  imageUrl: DataTypes.STRING,
-});
-
-// Multer for news images
+// Multer setup for news images
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
+    destination: (req, file, cb) => cb(null, "uploads/"),
+    filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname)
 });
 const upload = multer({ storage });
 
-// Health check
-app.get("/", (req, res) => res.send("✅ EbusPay Backend is running..."));
+// ==========================
+// In-memory DB (replace with real DB in production)
+// ==========================
+let users = []; // {id, name, email, passwordHash, balance, isAdmin}
+let transactions = []; // {id, userId, type, amount, date, reference}
+let newsList = []; // {id, title, content, imageUrl, createdAt}
 
-// Signup
-app.post("/api/auth/signup", async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ message: "All fields required" });
-    const existing = await User.findOne({ where: { email } });
-    if (existing) return res.status(400).json({ message: "User already exists" });
-    const hash = await bcrypt.hash(password, 10);
-    const user = await User.create({ name, email, password: hash });
-    res.json({ success: true, message: "Signup successful" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Error signing up" });
-  }
-});
-
-// Login
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ where: { email } });
-    if (!user) return res.status(401).json({ message: "Invalid credentials" });
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ message: "Invalid credentials" });
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: "7d" });
-    res.json({ success: true, token, user: { id: user.id, name: user.name, email: user.email, balance: user.balance } });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Login error" });
-  }
-});
-
-// Verify token / get profile
-app.get("/api/user/profile", async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: "No token" });
-  const token = authHeader.split(" ")[1];
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findByPk(decoded.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
-    res.json({ success: true, user: { id: user.id, name: user.name, email: user.email, balance: user.balance } });
-  } catch {
-    res.status(401).json({ message: "Invalid token" });
-  }
-});
-
-// News routes
-app.post("/api/news", upload.single("image"), async (req, res) => {
-  try {
-    const { title, content, adminPassword } = req.body;
-    if (adminPassword !== process.env.ADMIN_PASSWORD) return res.status(403).json({ message: "Unauthorized" });
-    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
-    const news = await News.create({ title, content, imageUrl });
-    res.json({ success: true, message: "News posted", news });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Error posting news" });
-  }
-});
-
-app.get("/api/news", async (req, res) => {
-  try {
-    const news = await News.findAll({ order: [["createdAt", "DESC"]] });
-    res.json({ success: true, news });
-  } catch {
-    res.status(500).json({ message: "Error fetching news" });
-  }
-});
-
-// Updated Delete News route with body check
-app.delete("/api/news/:id", async (req, res) => {
-  try {
-    const { adminPassword } = req.body; // <-- change from query to body
-    if (adminPassword !== process.env.ADMIN_PASSWORD) return res.status(403).json({ message: "Unauthorized" });
-
-    const news = await News.findByPk(req.params.id);
-    if (!news) return res.status(404).json({ message: "News not found" });
-
-    if (news.imageUrl) {
-      const filePath = path.join(process.cwd(), news.imageUrl);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+// ==========================
+// Middleware
+// ==========================
+function authMiddleware(req, res, next){
+    const authHeader = req.headers.authorization;
+    if(!authHeader) return res.status(401).json({message:"Unauthorized"});
+    const token = authHeader.split(" ")[1];
+    try{
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        next();
+    }catch(err){
+        res.status(401).json({message:"Invalid token"});
     }
+}
 
-    await news.destroy();
-    res.json({ success: true, message: "News deleted successfully" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Error deleting news" });
-  }
+// ==========================
+// Auth Routes
+// ==========================
+app.post("/api/auth/signup", async (req,res)=>{
+    const {name,email,password} = req.body;
+    if(users.find(u=>u.email===email)) return res.status(400).json({message:"Email exists"});
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = {id: Date.now().toString(), name, email, passwordHash, balance:0, isAdmin:false};
+    users.push(user);
+    res.json({message:"Signup successful"});
 });
 
-// Start server
-sequelize.sync().then(() => {
-  app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.post("/api/auth/login", async (req,res)=>{
+    const {email,password} = req.body;
+    const user = users.find(u=>u.email===email);
+    if(!user) return res.status(400).json({message:"User not found"});
+    const match = await bcrypt.compare(password, user.passwordHash);
+    if(!match) return res.status(400).json({message:"Incorrect password"});
+    const token = jwt.sign({id:user.id,email:user.email,isAdmin:user.isAdmin}, JWT_SECRET, {expiresIn:"7d"});
+    res.json({token, user:{id:user.id,name:user.name,email:user.email,balance:user.balance,isAdmin:user.isAdmin}});
 });
+
+app.get("/api/user/profile", authMiddleware, (req,res)=>{
+    const user = users.find(u=>u.id===req.user.id);
+    if(!user) return res.status(404).json({message:"User not found"});
+    res.json({user});
+});
+
+// ==========================
+// Transactions
+// ==========================
+app.get("/api/transactions", authMiddleware, (req,res)=>{
+    const userTx = transactions.filter(t=>t.userId===req.user.id);
+    res.json({transactions:userTx});
+});
+
+app.post("/api/transactions/deposit", authMiddleware, (req,res)=>{
+    const {amount, reference} = req.body;
+    const user = users.find(u=>u.id===req.user.id);
+    if(!user) return res.status(404).json({message:"User not found"});
+    user.balance += amount;
+    transactions.push({id:Date.now().toString(), userId:user.id, type:"Deposit", amount, date: new Date(), reference});
+    res.json({success:true});
+});
+
+// ==========================
+// Paystack Verification
+// ==========================
+app.post("/api/payments/verify", authMiddleware, async (req,res)=>{
+    const {reference, amount} = req.body;
+    try{
+        const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+            headers: {Authorization: `Bearer ${PAYSTACK_SECRET}`}
+        });
+        const data = await response.json();
+        if(data.status && data.data.status==="success" && data.data.amount/100===amount){
+            res.json({success:true});
+        } else res.status(400).json({success:false,message:"Payment failed"});
+    }catch(err){ res.status(500).json({success:false,message:"Error verifying payment"}); }
+});
+
+// ==========================
+// News Routes
+// ==========================
+app.get("/api/news", (req,res)=>{
+    res.json({success:true, news: newsList.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))});
+});
+
+app.post("/api/news", authMiddleware, upload.single("image"), (req,res)=>{
+    if(!req.user.isAdmin) return res.status(403).json({message:"Unauthorized"});
+    const {title, content} = req.body;
+    const imageUrl = req.file ? "/uploads/"+req.file.filename : null;
+    const news = {id: Date.now().toString(), title, content, imageUrl, createdAt: new Date()};
+    newsList.push(news);
+    res.json({success:true, news});
+});
+
+app.put("/api/news/:id", authMiddleware, upload.single("image"), (req,res)=>{
+    if(!req.user.isAdmin) return res.status(403).json({message:"Unauthorized"});
+    const news = newsList.find(n=>n.id===req.params.id);
+    if(!news) return res.status(404).json({message:"News not found"});
+    if(req.body.title) news.title = req.body.title;
+    if(req.body.content) news.content = req.body.content;
+    if(req.file) news.imageUrl = "/uploads/"+req.file.filename;
+    res.json({success:true, news});
+});
+
+app.delete("/api/news/:id", authMiddleware, (req,res)=>{
+    if(!req.user.isAdmin) return res.status(403).json({message:"Unauthorized"});
+    const index = newsList.findIndex(n=>n.id===req.params.id);
+    if(index===-1) return res.status(404).json({message:"News not found"});
+    const removed = newsList.splice(index,1);
+    res.json({success:true, removed});
+});
+
+// ==========================
+// Start Server
+// ==========================
+app.listen(PORT, ()=>console.log(`🚀 Server running on port ${PORT}`));
+
 
 
