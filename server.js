@@ -1,3 +1,4 @@
+// server.js (replace your existing backend file with this or merge)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -6,13 +7,17 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const { Sequelize, DataTypes } = require('sequelize');
 
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+
 // Load environment variables
 const PORT = process.env.PORT || 5000;
 const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://ebuspay.vercel.app';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'ebusadmin123'; // ✅ your admin password
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'ebusadmin123'; // change in Render env
 
 if (!DATABASE_URL || !JWT_SECRET || !PAYSTACK_SECRET_KEY) {
   console.error('❌ Please set DATABASE_URL, JWT_SECRET, and PAYSTACK_SECRET_KEY in Render environment variables');
@@ -24,6 +29,25 @@ const app = express();
 app.use(cors({ origin: ['https://ebuspay.vercel.app', 'http://localhost:3000'], credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// -------------------- UPLOADS (multer) --------------------
+const uploadDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    const fn = `${Date.now()}-${Math.round(Math.random()*1e6)}${ext}`;
+    cb(null, fn);
+  }
+});
+const upload = multer({ storage });
+
+// Serve uploaded images
+app.use('/uploads', express.static(uploadDir));
 
 // -------------------- DATABASE --------------------
 const sequelize = new Sequelize(DATABASE_URL, { dialect: 'postgres', logging: false });
@@ -51,15 +75,17 @@ const Transaction = sequelize.define('Transaction', {
 User.hasMany(Transaction);
 Transaction.belongsTo(User);
 
-// 📰 FOOTBALL NEWS MODEL
+// News model
 const News = sequelize.define('News', {
   title: { type: DataTypes.STRING, allowNull: false },
   content: { type: DataTypes.TEXT, allowNull: false },
-  imageUrl: { type: DataTypes.STRING },
+  imageUrl: { type: DataTypes.STRING }, // e.g. '/uploads/12345.jpg' or a full URL
   publishedAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 });
 
-sequelize.sync({ alter: true });
+sequelize.sync({ alter: true })
+  .then(() => console.log('✅ Models synced'))
+  .catch(err => console.error('Sync error', err));
 
 // -------------------- HELPERS --------------------
 const generateToken = (id) => jwt.sign({ id }, JWT_SECRET, { expiresIn: '7d' });
@@ -87,7 +113,7 @@ const protect = async (req, res, next) => {
 // Health check
 app.get('/', (req, res) => res.json({ success: true, message: 'EbusPay API running ✅' }));
 
-// Signup
+// Auth routes (signup/login) — unchanged
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -105,7 +131,6 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Login
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -200,32 +225,72 @@ app.post('/api/payments/verify', protect, async (req, res) => {
   }
 });
 
-// -------------------- 📰 FOOTBALL NEWS ROUTES --------------------
+// -------------------- 📰 NEWS ROUTES (with uploads + delete) --------------------
 
-// Create news (Admin Only)
-app.post('/api/news', async (req, res) => {
+// Create news (Admin Only) — accepts multipart/form-data with "image" file field
+app.post('/api/news', upload.single('image'), async (req, res) => {
   try {
-    const { title, content, imageUrl, adminPassword } = req.body;
-
-    if (adminPassword !== ADMIN_PASSWORD)
+    // adminPassword can come from form field (multipart) or JSON body
+    const adminPassword = req.body.adminPassword || req.body.adminpassword || req.headers['x-admin-password'];
+    if (adminPassword !== ADMIN_PASSWORD) {
+      // remove uploaded file if unauthorized
+      if (req.file && req.file.path) {
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
+      }
       return res.status(403).json({ success: false, message: 'Unauthorized: wrong admin password' });
+    }
 
-    if (!title || !content)
+    const { title, content } = req.body;
+    if (!title || !content) {
+      if (req.file && req.file.path) {
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
+      }
       return res.status(400).json({ success: false, message: 'Title and content required' });
+    }
 
+    const imageUrl = req.file ? `/uploads/${req.file.filename}` : (req.body.imageUrl || null);
     const news = await News.create({ title, content, imageUrl });
     res.status(201).json({ success: true, news });
   } catch (err) {
+    console.error('POST /api/news error', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// Get all football news
+// Get all football news (public)
 app.get('/api/news', async (req, res) => {
   try {
     const news = await News.findAll({ order: [['publishedAt', 'DESC']] });
     res.json({ success: true, news });
   } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Delete news (Admin only) — accepts adminPassword in body, query or header
+app.delete('/api/news/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const adminPassword = req.body?.adminPassword || req.query?.adminPassword || req.headers['x-admin-password'];
+    if (adminPassword !== ADMIN_PASSWORD) {
+      return res.status(403).json({ success: false, message: 'Unauthorized: wrong admin password' });
+    }
+
+    const news = await News.findByPk(id);
+    if (!news) return res.status(404).json({ success: false, message: 'News not found' });
+
+    // delete image file if stored in uploads folder (imageUrl like '/uploads/filename')
+    if (news.imageUrl && news.imageUrl.startsWith('/uploads/')) {
+      const filePath = path.join(process.cwd(), news.imageUrl);
+      if (fs.existsSync(filePath)) {
+        try { fs.unlinkSync(filePath); } catch (e) { console.warn('Failed deleting file', e); }
+      }
+    }
+
+    await news.destroy();
+    res.json({ success: true, message: 'News deleted' });
+  } catch (err) {
+    console.error('DELETE /api/news/:id error', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
