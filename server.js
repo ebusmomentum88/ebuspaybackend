@@ -56,7 +56,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // Health check
-app.get("/", (req, res) => res.send("✅ EbusPay Backend is running..."));
+app.get("/", (req, res) => res.send("✅ Paymoment Backend is running..."));
 
 // Signup
 app.post("/api/auth/signup", async (req, res) => {
@@ -154,6 +154,7 @@ app.delete("/api/news/:id", async (req, res) => {
 sequelize.sync().then(() => {
   app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 });
+
 
 
 
