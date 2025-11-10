@@ -1,5 +1,5 @@
 {
-  "name": "ebuspay-backend",
+  "name": "Paymoment-backend",
   "version": "1.0.0",
   "main": "server.js",
   "type": "module",
@@ -17,6 +17,7 @@
     "sequelize": "^6.35.0"
   }
 }
+
 
 
 
