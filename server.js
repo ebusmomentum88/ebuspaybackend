@@ -8,19 +8,27 @@ const { Pool } = require('pg');
 const axios = require('axios');
 
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
+
+// ✅ Allow frontend requests
+app.use(
+  cors({
+    origin: 'https://pay-bills-mxfj.vercel.app',
+    credentials: true,
+  })
+);
+
 app.use(bodyParser.json());
 
-// Database
+// ====================== DATABASE ======================
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: postgresql://momentdb_user:0hkX7EbVx0uPxjFcB621HPfCmUfjLimW@dpg-d48skqkhg0os738fnihg-a/momentdb,
   ssl: { rejectUnauthorized: false },
 });
 
-// JWT secret
+// ====================== JWT SECRET ======================
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Authentication Middleware
+// ====================== AUTH MIDDLEWARE ======================
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ message: 'Unauthorized' });
@@ -46,7 +54,10 @@ app.post('/api/auth/signup', async (req, res) => {
     res.json({ success: true, message: 'Account created successfully' });
   } catch (err) {
     console.error(err);
-    res.status(400).json({ message: 'User already exists' });
+    if (err.code === '23505') {
+      return res.status(400).json({ message: 'Email already exists' });
+    }
+    res.status(400).json({ message: 'Error creating user' });
   }
 });
 
@@ -76,8 +87,14 @@ app.post('/api/paystack/initialize', authenticateToken, async (req, res) => {
   try {
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
-      { email, amount: amount * 100 },
-      { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
+      {
+        email,
+        amount: amount * 100,
+        callback_url: 'https://pay-bills-mxfj.vercel.app/verify-payment',
+      },
+      {
+        headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
+      }
     );
     res.json(response.data);
   } catch (err) {
@@ -147,9 +164,12 @@ app.get('/api/user/transactions', authenticateToken, async (req, res) => {
 
 // ====================== SERVER ======================
 app.get('/', (req, res) => res.send('✅ PayMoment Backend is Live'));
+
 app.listen(process.env.PORT || 5000, () =>
   console.log(`🚀 Server running on port ${process.env.PORT || 5000}`)
 );
+
+
 
 
 
