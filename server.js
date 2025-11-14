@@ -11,7 +11,7 @@ const app = express();
 
 // Allow frontend
 app.use(cors({
-  origin: ['https://pay-bills-2.vercel.app', 'https://pay-bills-mxfj.vercel.app'],
+  origin: ['https://pay-bills-2.vercel.app', 'https://paymoment-flow.vercel.app'],
   credentials: true
 }));
 app.use(bodyParser.json());
@@ -187,6 +187,7 @@ app.get('/', (req, res) => res.send('✅ PayMoment Backend is Live'));
 app.listen(process.env.PORT || 5000, () =>
   console.log(`🚀 Server running on port ${process.env.PORT || 5000}`)
 );
+
 
 
 
